@@ -31,7 +31,7 @@ public class ChannelDemo1 {
                 // 检查是否还有剩余的数据
                 while (byteBuf.hasRemaining()) {
                     byte b = byteBuf.get();
-                    log.debug("实际字节");
+                    log.debug("实际字节 {}", (char) b);
                 }
                 // 切换为写模式
                 byteBuf.clear();
