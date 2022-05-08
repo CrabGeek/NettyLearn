@@ -6,9 +6,11 @@ import util.ByteBufferUtil;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.*;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
+import java.nio.channels.ServerSocketChannel;
+import java.nio.channels.SocketChannel;
 import java.util.Iterator;
-import java.util.Set;
 
 @Slf4j
 public class Server {
@@ -44,18 +46,27 @@ public class Server {
                     ServerSocketChannel channel = (ServerSocketChannel) key.channel();
                     SocketChannel sc = channel.accept();
                     sc.configureBlocking(false);
-                    SelectionKey scKey = sc.register(selector, 0, null);
+                    ByteBuffer buffer = ByteBuffer.allocate(16); // attachment
+                    // 将一个byteBuffer作为附件，关联到selectionKey上
+                    SelectionKey scKey = sc.register(selector, 0, buffer);
                     // key 设置只关注read事件
                     scKey.interestOps(SelectionKey.OP_READ);
                     log.debug("sc {}", sc);
                 } else if (key.isReadable()) { // 如果是read
                    try {
                        SocketChannel channel = (SocketChannel) key.channel();
-                       ByteBuffer buffer = ByteBuffer.allocate(16);
+                       // 获取selectionKey附件
+                       ByteBuffer buffer = (ByteBuffer) key.attachment();
                        int read = channel.read(buffer);
                        if (read != -1) {
-                           buffer.flip();
-                           ByteBufferUtil.debugAll(buffer);
+                           split(buffer);
+                           // buffer满了需要扩容
+                           if (buffer.position() == buffer.limit()) {
+                               ByteBuffer newByteBuffer = ByteBuffer.allocate(buffer.capacity() * 2);
+                               buffer.flip();
+                               newByteBuffer.put(buffer);
+                               key.attach(newByteBuffer);
+                           }
                        } else {
                            key.cancel();
                        }
@@ -65,12 +76,29 @@ public class Server {
                        // 因为客户端断开了，因此需要将key取消（从 selector的key集合中，真正删除)
                        key.cancel();
                    }
-
                 }
                 // 取消事件
 //                key.cancel();
             }
-
         }
+    }
+
+    private static void split(ByteBuffer source) {
+        source.flip();
+        for (int i = 0; i < source.limit(); i++) {
+            // 找到完成消息
+            if (source.get(i) == '\n') {
+                int length = i + 1 - source.position();
+                // 把这条完整消息存入新的ByteBuffer
+                ByteBuffer target = ByteBuffer.allocate(length);
+                // 从 source读, 向target写
+                for (int j = 0; j < length; j++) {
+                    target.put(source.get());
+                }
+
+                ByteBufferUtil.debugAll(target);
+            }
+        }
+        source.compact();
     }
 }
